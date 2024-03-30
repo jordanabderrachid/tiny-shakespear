@@ -7,6 +7,7 @@ import torch
 
 NO_CHAR = "#"
 CONTEXT_WINDOW = 8
+BATCH_SIZE = 32
 
 
 class Tokenizer:
@@ -105,12 +106,12 @@ def run(args):
         sys.exit(0)
 
     dev_ds = ShakespearDataset("dev")
-    i = 0
-    for x, y in dev_ds:
-        if i >= 10:
-            break
-        print("".join([t.i_to_s(i) for i in x.tolist()]), t.i_to_s(y.item()))
-        i += 1
+    dev_dl = torch.utils.data.DataLoader(dev_ds, batch_size=BATCH_SIZE, shuffle=True)
+    for X, Y in dev_dl:
+        for i in range(BATCH_SIZE):
+            x, y = X[i], Y[i]
+            print("".join([t.i_to_s(i) for i in x.tolist()]), "->", t.i_to_s(y.item()))
+        break
 
 
 def main():
