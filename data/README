@@ -1,0 +1,8 @@
+The dataset was downloaded from https://github.com/karpathy/char-rnn
+It contains 40k lines of Shakespear work in english
+
+Run the following command to retrieve the data
+
+```
+wget -O data/input.txt https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt
+```

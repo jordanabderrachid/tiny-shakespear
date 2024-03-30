@@ -1,0 +1,10 @@
+Install the dependencies
+
+`pip install -r requirements.txt`
+
+Run the program using `python main.py`. Use command line arguments to specify which mode
+you would like to use.
+
+- data: generates the training, validation and test dataset from the raw text
+- train: trains the model using the pre-generated dataset
+- infer: runs autoregressive inference using the trained model
