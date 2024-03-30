@@ -1,4 +1,5 @@
 import argparse
+import io
 from os import path
 import sys
 
@@ -28,37 +29,22 @@ class Tokenizer:
         return res.to(torch.int8)
 
 
-# class ShakespearDataset(torch.utils.data.Dataset):
-#     def __init__(self, tokenizer: Tokenizer, text: str, context_window=CONTEXT_WINDOW):
-#         tokenized_text = tokenizer.tokenize(text)
-#         x_list = []
-#         y_list = []
-#         mask = (
-#             torch.ones(context_window, context_window)
-#             .tril()
-#             .flip(1)
-#             .to(dtype=torch.int64)
-#         )
-#         for i in range(len(tokenized_text) - context_window - 1):
-#             if i % 100 == 0:
-#                 print(i, len(tokenized_text) - context_window - 1)
+class ShakespearDataset(torch.utils.data.Dataset):
+    def __init__(self, split: str):
+        if split not in ["dev", "test", "valid"]:
+            raise "invalid split"
 
-#             input = tokenized_text[i : i + context_window]
-#             target = tokenized_text[i + context_window]
+        with open(path.dirname(__file__) + f"/data/{split}.pt", "rb") as file:
+            buffer = io.BytesIO(file.read())
+            data = torch.load(buffer)
+            self.x = data["x"]
+            self.y = data["y"]
 
-#             x = input.repeat(context_window, 1) * mask
-#             y = target.repeat(context_window)
-#             x_list.append(x)
-#             y_list.append(y)
+    def __len__(self):
+        return self.x.shape[0]
 
-#         self.X = torch.cat(x_list)
-#         self.Y = torch.cat(y_list)
-
-#     def __len__(self):
-#         return self.X.shape[0]
-
-#     def __getitem__(self, index):
-#         return self.X[index], self.Y[index]
+    def __getitem__(self, index):
+        return self.x[index], self.y[index]
 
 
 def make_ds_tensors(tokenizer: Tokenizer, text: str, context_window=CONTEXT_WINDOW):
@@ -102,11 +88,6 @@ def make_dataset(tokenizer, text):
 
 
 def run(args):
-    if args.mode != "data":
-        print("not implemented")
-        sys.exit(1)
-        # raise Exception("not implemented")
-
     t = None
     text = None
     try:
@@ -123,6 +104,14 @@ def run(args):
         make_dataset(t, text)
         sys.exit(0)
 
+    dev_ds = ShakespearDataset("dev")
+    i = 0
+    for x, y in dev_ds:
+        if i >= 10:
+            break
+        print("".join([t.i_to_s(i) for i in x.tolist()]), t.i_to_s(y.item()))
+        i += 1
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -130,7 +119,6 @@ def main():
         description="generate shakespear like text using a transformer architecture",
     )
 
-    # parser.add_argument("-h", "--help", action="help")
     parser.add_argument(
         "-m",
         "--mode",
