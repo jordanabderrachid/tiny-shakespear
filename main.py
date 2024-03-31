@@ -145,6 +145,44 @@ def train(model: nn.Module, train_dl, dev_dl):
     eval(model, dev_dl)
 
 
+def run_data(tokenizer, text):
+    make_dataset(tokenizer, text)
+
+
+def run_train(tokenizer):
+    train_dl = torch.utils.data.DataLoader(
+        ShakespearDataset("train"), batch_size=BATCH_SIZE, shuffle=True
+    )
+    dev_dl = torch.utils.data.DataLoader(
+        ShakespearDataset("dev"), batch_size=BATCH_SIZE
+    )
+    model = Model(tokenizer.vocab_size)
+    train(model, train_dl, dev_dl)
+    torch.save(model, "data/model.pt")
+
+
+@torch.no_grad()
+def run_infer(tokenizer: Tokenizer):
+    with open(path.dirname(__file__) + "/data/model.pt", "rb") as file:
+        buffer = io.BytesIO(file.read())
+        model = torch.load(buffer)
+
+    model.eval()
+    res = []
+    context = torch.zeros((1, 1), dtype=torch.long)
+    for _ in range(1000):
+        context = context[:, -CONTEXT_WINDOW:]
+        logits = model(context)  # logits is (1, T, VOCAB_SIZE)
+        probs = F.softmax(logits, dim=2)  # probs is (1, T, VOCAB_SIZE)
+        next_idx = torch.multinomial(
+            probs[:, -1, :], 1
+        )  # draw 1 sample from the last T next_idx is (1, 1)
+        res.append(next_idx.item())
+        context = torch.cat([context, next_idx], dim=1)
+
+    print("".join(tokenizer.i_to_s(i) for i in res))
+
+
 def run(args):
     t = None
     text = None
@@ -159,17 +197,13 @@ def run(args):
         sys.exit(1)
 
     if args.mode == "data":
-        make_dataset(t, text)
-        sys.exit(0)
+        run_data(t, text)
 
-    train_dl = torch.utils.data.DataLoader(
-        ShakespearDataset("train"), batch_size=BATCH_SIZE, shuffle=True
-    )
-    dev_dl = torch.utils.data.DataLoader(
-        ShakespearDataset("dev"), batch_size=BATCH_SIZE
-    )
-    model = Model(t.vocab_size)
-    train(model, train_dl, dev_dl)
+    if args.mode == "train":
+        run_train(t)
+
+    if args.mode == "infer":
+        run_infer(t)
 
 
 def main():
