@@ -53,20 +53,15 @@ def make_ds_tensors(tokenizer: Tokenizer, text: str, context_window=CONTEXT_WIND
     tokenized_text = tokenizer.tokenize(text)
     x_list = []
     y_list = []
-    mask = (
-        torch.ones(context_window, context_window).tril().flip(1).to(dtype=torch.int8)
-    )
+    mask = torch.ones(context_window, context_window).tril().to(dtype=torch.int8)
     for i in tqdm(range(len(tokenized_text) - context_window - 1)):
-        # if i % 10000 == 0:
-        #     print(i, len(tokenized_text) - context_window - 1)
-
         input = tokenized_text[i : i + context_window]
-        target = tokenized_text[i + context_window]
+        target = tokenized_text[i + 1 : i + context_window + 1]
 
         x = input.repeat(context_window, 1) * mask
-        y = target.repeat(context_window)
+        # y = target.repeat(context_window)
         x_list.append(x)
-        y_list.append(y)
+        y_list.append(target)
 
     return (torch.cat(x_list), torch.cat(y_list))
 
