@@ -4,10 +4,16 @@ from os import path
 import sys
 
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from tqdm import tqdm
 
+# hyper parameters
 CONTEXT_WINDOW = 8
 BATCH_SIZE = 32
+N_MODEL = 32
+EPOCH = 1
+LEARNING_RATE = 1e-3
 
 
 class Tokenizer:
@@ -16,8 +22,8 @@ class Tokenizer:
         self._i_to_s = {}
         self._s_to_i = {}
         for i, c in enumerate(sorted(list(chars))):
-            self._i_to_s[i + 1] = c
-            self._s_to_i[c] = i + 1
+            self._i_to_s[i] = c
+            self._s_to_i[c] = i
 
     def i_to_s(self, i: int) -> str:
         return self._i_to_s[i]
@@ -27,12 +33,12 @@ class Tokenizer:
 
     def tokenize(self, text: str) -> torch.Tensor:
         res = torch.Tensor([self.s_to_i(s) for s in list(text)])
-        return res.to(torch.int8)
+        return res.to(torch.long)
 
 
 class ShakespearDataset(torch.utils.data.Dataset):
     def __init__(self, split: str):
-        if split not in ["dev", "test", "valid"]:
+        if split not in ["train", "dev", "test"]:
             raise "invalid split"
 
         with open(path.dirname(__file__) + f"/data/{split}.pt", "rb") as file:
@@ -46,6 +52,26 @@ class ShakespearDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         return self.x[index], self.y[index]
+
+
+class Model(nn.Module):
+    def __init__(self, vocab_size):
+        super().__init__()
+        self.token_embedding = nn.Embedding(vocab_size, N_MODEL)
+        self.position_embedding = nn.Embedding(CONTEXT_WINDOW, N_MODEL)
+
+        # this layer project the internal representation of dim N_MODEL
+        # to a vocab_size dimension that represents the logits
+        self.lm_head = nn.Linear(N_MODEL, vocab_size)
+
+    # x is (B, T) we have to be careful that during inference, 1 <= T <= CONTEXT_WINDOW
+    # we want to output logits (B, T, vocab_size)
+    def forward(self, x):
+        _, T = x.shape
+        token_emb = self.token_embedding(x)  # (B, T, N_MODEL)
+        position_emb = self.position_embedding(torch.arange(T))  # (T, N_MODEL)
+        h = token_emb + position_emb  # (B, T, N_MODEL) thanks to broadcasting
+        return self.lm_head(h)
 
 
 def make_ds_tensors(tokenizer: Tokenizer, text: str, context_window=CONTEXT_WINDOW):
@@ -64,21 +90,59 @@ def make_ds_tensors(tokenizer: Tokenizer, text: str, context_window=CONTEXT_WIND
 
 
 def make_dataset(tokenizer, text):
-    dev_text = text[: int(len(text) * 0.8)]
-    valid_text = text[int(len(text) * 0.8) : int(len(text) * 0.9)]
+    train_text = text[: int(len(text) * 0.8)]
+    dev_text = text[int(len(text) * 0.8) : int(len(text) * 0.9)]
     test_text = text[int(len(text) * 0.9) :]
+
+    x_train, y_train = make_ds_tensors(tokenizer, train_text)
+    torch.save({"x": x_train, "y": y_train}, "data/train.pt")
+    print("dev done")
 
     x_dev, y_dev = make_ds_tensors(tokenizer, dev_text)
     torch.save({"x": x_dev, "y": y_dev}, "data/dev.pt")
-    print("dev done")
-
-    x_valid, y_valid = make_ds_tensors(tokenizer, valid_text)
-    torch.save({"x": x_valid, "y": y_valid}, "data/valid.pt")
     print("valid done")
 
     x_test, y_test = make_ds_tensors(tokenizer, test_text)
     torch.save({"x": x_test, "y": y_test}, "data/test.pt")
     print("test done")
+
+
+def get_loss(logits, Y):
+    # we need to reshape Y and logits to make it fit to cross_entropy_loss
+    # logits (B, T, C) -> (B*T, C)
+    # Y (B, T) -> (B*T,)
+    B, T, C = logits.shape
+    return F.cross_entropy(logits.view((B * T, C)), Y.view((B * T,)))
+
+
+@torch.no_grad()
+def eval(model: nn.Module, dev_dl):
+    model.eval()
+    losses = []
+    for X, Y in dev_dl:
+        logits = model(X)
+        loss = get_loss(logits, Y)
+        losses.append(loss.item())
+
+    print(f"dev loss={torch.tensor(losses).mean().item()}")
+    model.train()
+
+
+def train(model: nn.Module, train_dl, dev_dl):
+    model.train()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
+    for e in range(EPOCH):
+        print(f"--- EPOCH {e + 1} ---")
+        for X, Y in train_dl:
+            # X is (B, T)
+            # Y is (B, T)
+            logits = model(X)  # logits is (B, T, vocab_size C)
+            loss = get_loss(logits, Y)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+    eval(model, dev_dl)
 
 
 def run(args):
@@ -98,20 +162,14 @@ def run(args):
         make_dataset(t, text)
         sys.exit(0)
 
-    dev_ds = ShakespearDataset("dev")
-    dev_dl = torch.utils.data.DataLoader(dev_ds, batch_size=BATCH_SIZE, shuffle=True)
-    for X, Y in dev_dl:
-        for i in range(BATCH_SIZE):
-            x, y = X[i], Y[i]
-            print(x, y)
-            for j in range(y.shape[0]):
-                print(
-                    "".join([t.i_to_s(i) for i in x[: j + 1].tolist()]),
-                    "->",
-                    t.i_to_s(y[j].item()),
-                )
-            break
-        break
+    train_dl = torch.utils.data.DataLoader(
+        ShakespearDataset("train"), batch_size=BATCH_SIZE, shuffle=True
+    )
+    dev_dl = torch.utils.data.DataLoader(
+        ShakespearDataset("dev"), batch_size=BATCH_SIZE
+    )
+    model = Model(t.vocab_size)
+    train(model, train_dl, dev_dl)
 
 
 def main():
