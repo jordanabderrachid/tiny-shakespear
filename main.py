@@ -6,16 +6,15 @@ import sys
 import torch
 from tqdm import tqdm
 
-NO_CHAR = "#"
 CONTEXT_WINDOW = 8
 BATCH_SIZE = 32
 
 
 class Tokenizer:
     def __init__(self, chars: set):
-        self.vocab_size = len(chars) + 1
-        self._i_to_s = {0: NO_CHAR}
-        self._s_to_i = {NO_CHAR: 0}
+        self.vocab_size = len(chars)
+        self._i_to_s = {}
+        self._s_to_i = {}
         for i, c in enumerate(sorted(list(chars))):
             self._i_to_s[i + 1] = c
             self._s_to_i[c] = i + 1
@@ -53,17 +52,15 @@ def make_ds_tensors(tokenizer: Tokenizer, text: str, context_window=CONTEXT_WIND
     tokenized_text = tokenizer.tokenize(text)
     x_list = []
     y_list = []
-    mask = torch.ones(context_window, context_window).tril().to(dtype=torch.int8)
+
     for i in tqdm(range(len(tokenized_text) - context_window - 1)):
         input = tokenized_text[i : i + context_window]
         target = tokenized_text[i + 1 : i + context_window + 1]
 
-        x = input.repeat(context_window, 1) * mask
-        # y = target.repeat(context_window)
-        x_list.append(x)
+        x_list.append(input)
         y_list.append(target)
 
-    return (torch.cat(x_list), torch.cat(y_list))
+    return (torch.stack(x_list, 0), torch.stack(y_list, 0))
 
 
 def make_dataset(tokenizer, text):
@@ -106,7 +103,14 @@ def run(args):
     for X, Y in dev_dl:
         for i in range(BATCH_SIZE):
             x, y = X[i], Y[i]
-            print("".join([t.i_to_s(i) for i in x.tolist()]), "->", t.i_to_s(y.item()))
+            print(x, y)
+            for j in range(y.shape[0]):
+                print(
+                    "".join([t.i_to_s(i) for i in x[: j + 1].tolist()]),
+                    "->",
+                    t.i_to_s(y[j].item()),
+                )
+            break
         break
 
 
