@@ -4,6 +4,7 @@ from os import path
 import sys
 
 import torch
+from tqdm import tqdm
 
 NO_CHAR = "#"
 CONTEXT_WINDOW = 8
@@ -55,9 +56,9 @@ def make_ds_tensors(tokenizer: Tokenizer, text: str, context_window=CONTEXT_WIND
     mask = (
         torch.ones(context_window, context_window).tril().flip(1).to(dtype=torch.int8)
     )
-    for i in range(len(tokenized_text) - context_window - 1):
-        if i % 10000 == 0:
-            print(i, len(tokenized_text) - context_window - 1)
+    for i in tqdm(range(len(tokenized_text) - context_window - 1)):
+        # if i % 10000 == 0:
+        #     print(i, len(tokenized_text) - context_window - 1)
 
         input = tokenized_text[i : i + context_window]
         target = tokenized_text[i + context_window]
