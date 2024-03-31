@@ -132,15 +132,16 @@ def train(model: nn.Module, train_dl, dev_dl):
     model.train()
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
     for e in range(EPOCH):
-        print(f"--- EPOCH {e + 1} ---")
-        for X, Y in train_dl:
-            # X is (B, T)
-            # Y is (B, T)
-            logits = model(X)  # logits is (B, T, vocab_size C)
-            loss = get_loss(logits, Y)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+        with tqdm(desc=f"--- EPOCH {e + 1} ---", total=len(train_dl)) as pbar:
+            for X, Y in train_dl:
+                # X is (B, T)
+                # Y is (B, T)
+                logits = model(X)  # logits is (B, T, vocab_size C)
+                loss = get_loss(logits, Y)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                pbar.update()
 
     eval(model, dev_dl)
 
@@ -217,8 +218,8 @@ def main():
         "--mode",
         nargs="?",
         choices=["data", "train", "infer"],
-        default="data",
-        help="selects which mode to run in. default is data",
+        default="infer",
+        help="selects which mode to run in. default is infer",
     )
 
     run(parser.parse_args())
