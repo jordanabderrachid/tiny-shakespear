@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 # hyper parameters
-CONTEXT_WINDOW = 8
+CONTEXT_WINDOW = 32
 BATCH_SIZE = 32
 D_MODEL = 32
 N_LAYER = 2
