@@ -12,10 +12,10 @@ from tqdm import tqdm
 CONTEXT_WINDOW = 8
 BATCH_SIZE = 32
 D_MODEL = 32
-HEAD = 1
-D_K = D_MODEL // HEAD
-D_V = D_MODEL // HEAD
-D_FF = D_MODEL * 4
+HEAD = 2
+D_K = D_MODEL // HEAD  # (16)
+D_V = D_MODEL // HEAD  # (16)
+D_FF = D_MODEL * 4  # (128)
 EPOCH = 1
 LEARNING_RATE = 1e-3
 
@@ -90,6 +90,19 @@ class MaskedAttentionHead(nn.Module):
         return W @ V  # (B, T, D_V)
 
 
+class MultiHead(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.heads = nn.ModuleList([MaskedAttentionHead() for _ in range(HEAD)])
+        self.linear = nn.Linear(HEAD * D_V, D_MODEL)
+
+    # x is (B, T, D_MODEL)
+    # out is (B, T, D_MODEL)
+    def forward(self, x):
+        y = torch.cat([h(x) for h in self.heads], dim=-1)  # (B, T, HEAD * D_V)
+        return self.linear(y)
+
+
 class FeedForward(nn.Module):
     def __init__(self):
         super().__init__()
@@ -101,13 +114,24 @@ class FeedForward(nn.Module):
         return self.layers(x)
 
 
+class Block(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.masked_multi_head_attention = MultiHead()
+        self.feed_forward = FeedForward()
+
+    def forward(self, x):
+        y = self.masked_multi_head_attention(x)
+        y = self.feed_forward(y)
+        return y
+
+
 class Model(nn.Module):
     def __init__(self, vocab_size):
         super().__init__()
         self.token_embedding = nn.Embedding(vocab_size, D_MODEL)
         self.position_embedding = nn.Embedding(CONTEXT_WINDOW, D_MODEL)
-        self.attention_head = MaskedAttentionHead()
-        self.ff = FeedForward()
+        self.block = Block()
         # this layer project the internal representation of dim D_MODEL
         # to a vocab_size dimension that represents the logits
         self.lm_head = nn.Linear(D_MODEL, vocab_size)
@@ -119,8 +143,7 @@ class Model(nn.Module):
         token_emb = self.token_embedding(x)  # (B, T, D_MODEL)
         position_emb = self.position_embedding(torch.arange(T))  # (T, D_MODEL)
         h = token_emb + position_emb  # (B, T, D_MODEL) thanks to broadcasting
-        h = self.attention_head(h)
-        h = self.ff(h)
+        h = self.block(h)
         return self.lm_head(h)
 
 
@@ -193,7 +216,7 @@ def train(model: nn.Module, train_dl, dev_dl):
                 optimizer.step()
                 pbar.update()
 
-    eval(model, dev_dl)
+        eval(model, dev_dl)
 
 
 def run_data(tokenizer, text):
