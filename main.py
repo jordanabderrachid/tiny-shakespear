@@ -1,6 +1,6 @@
 import argparse
 import io
-from os import path
+import os
 import sys
 
 import torch
@@ -11,14 +11,15 @@ from tqdm import tqdm
 # hyper parameters
 CONTEXT_WINDOW = 32
 BATCH_SIZE = 32
-D_MODEL = 32
-N_LAYER = 2
-HEAD = 2
-D_K = D_MODEL // HEAD  # (16)
-D_V = D_MODEL // HEAD  # (16)
-D_FF = D_MODEL * 4  # (128)
+D_MODEL = 512
+N_LAYER = 6
+HEAD = 8
+D_K = D_MODEL // HEAD  # (64)
+D_V = D_MODEL // HEAD  # (64)
+D_FF = D_MODEL * 4  # (2048)
 EPOCH = 1
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 3e-4
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 class Tokenizer:
@@ -46,11 +47,11 @@ class ShakespearDataset(torch.utils.data.Dataset):
         if split not in ["train", "dev", "test"]:
             raise "invalid split"
 
-        with open(path.dirname(__file__) + f"/data/{split}.pt", "rb") as file:
+        with open(os.path.abspath("") + f"/data/{split}.pt", "rb") as file:
             buffer = io.BytesIO(file.read())
             data = torch.load(buffer)
-            self.x = data["x"]
-            self.y = data["y"]
+            self.x = data["x"].to(DEVICE)
+            self.y = data["y"].to(DEVICE)
 
     def __len__(self):
         return self.x.shape[0]
@@ -146,7 +147,9 @@ class Model(nn.Module):
     def forward(self, x):
         _, T = x.shape
         token_emb = self.token_embedding(x)  # (B, T, D_MODEL)
-        position_emb = self.position_embedding(torch.arange(T))  # (T, D_MODEL)
+        position_emb = self.position_embedding(
+            torch.arange(T, device=DEVICE)
+        )  # (T, D_MODEL)
         h = token_emb + position_emb  # (B, T, D_MODEL) thanks to broadcasting
         h = self.blocks(h)
         return self.lm_head(h)
@@ -235,20 +238,20 @@ def run_train(tokenizer):
     dev_dl = torch.utils.data.DataLoader(
         ShakespearDataset("dev"), batch_size=BATCH_SIZE
     )
-    model = Model(tokenizer.vocab_size)
+    model = Model(tokenizer.vocab_size).to(DEVICE)
     train(model, train_dl, dev_dl)
     torch.save(model, "data/model.pt")
 
 
 @torch.no_grad()
 def run_infer(tokenizer: Tokenizer):
-    with open(path.dirname(__file__) + "/data/model.pt", "rb") as file:
+    with open(os.path.abspath("") + "/data/model.pt", "rb") as file:
         buffer = io.BytesIO(file.read())
-        model = torch.load(buffer)
+        model = torch.load(buffer).to(DEVICE)
 
     model.eval()
     res = []
-    context = torch.zeros((1, 1), dtype=torch.long)
+    context = torch.zeros((1, 1), dtype=torch.long, device=DEVICE)
     for _ in range(1000):
         context = context[:, -CONTEXT_WINDOW:]
         logits = model(context)  # logits is (1, T, VOCAB_SIZE)
@@ -266,7 +269,7 @@ def run(args):
     t = None
     text = None
     try:
-        with open(path.dirname(__file__) + "/data/input.txt") as f:
+        with open(os.path.abspath("") + "/data/input.txt") as f:
             text = f.read()
             # TODO persist tokenizer state to file so we don't need the raw
             # input at training or inference
