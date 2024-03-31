@@ -245,12 +245,14 @@ def run_train(tokenizer):
 
 @torch.no_grad()
 def run_infer(tokenizer: Tokenizer):
-    with open(os.path.abspath("") + "/data/model.pt", "rb") as file:
+    with open(os.path.abspath("") + "/model.pt", "rb") as file:
         buffer = io.BytesIO(file.read())
-        model = torch.load(buffer).to(DEVICE)
+        if DEVICE == "cpu":
+            model = torch.load(buffer, map_location=torch.device("cpu")).to(DEVICE)
+        else:
+            model = torch.load(buffer).to(DEVICE)
 
     model.eval()
-    res = []
     context = torch.zeros((1, 1), dtype=torch.long, device=DEVICE)
     for _ in range(1000):
         context = context[:, -CONTEXT_WINDOW:]
@@ -259,10 +261,9 @@ def run_infer(tokenizer: Tokenizer):
         next_idx = torch.multinomial(
             probs[:, -1, :], 1
         )  # draw 1 sample from the last T next_idx is (1, 1)
-        res.append(next_idx.item())
+        sys.stdout.write(tokenizer.i_to_s(next_idx.item()))
+        sys.stdout.flush()
         context = torch.cat([context, next_idx], dim=1)
-
-    print("".join(tokenizer.i_to_s(i) for i in res))
 
 
 def run(args):
