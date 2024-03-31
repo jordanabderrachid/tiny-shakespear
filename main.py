@@ -11,7 +11,11 @@ from tqdm import tqdm
 # hyper parameters
 CONTEXT_WINDOW = 8
 BATCH_SIZE = 32
-N_MODEL = 32
+D_MODEL = 32
+HEAD = 1
+D_K = D_MODEL // HEAD
+D_V = D_MODEL // HEAD
+D_FF = D_MODEL * 4
 EPOCH = 1
 LEARNING_RATE = 1e-3
 
@@ -54,23 +58,69 @@ class ShakespearDataset(torch.utils.data.Dataset):
         return self.x[index], self.y[index]
 
 
+class MaskedAttentionHead(nn.Module):
+    """
+    MaskedAttentionHead implements a single masked self-attention unit
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.query = nn.Linear(D_MODEL, D_K, bias=False)
+        self.key = nn.Linear(D_MODEL, D_K, bias=False)
+        self.value = nn.Linear(D_MODEL, D_V, bias=False)
+        self.register_buffer(
+            "mask", torch.tril(torch.ones((CONTEXT_WINDOW, CONTEXT_WINDOW)))
+        )
+
+    # X is (B, T, C) C == D_MODEL
+    # out is (B, T, D_V)
+    def forward(self, X):
+        _, T, _ = X.shape  # this is needed for inference where T != CONTEXT_WINDOW
+
+        Q = self.query(X)  # Q is (B, T, D_K)
+        K = self.key(X).transpose(1, 2)  # K is (B, D_K, T)
+        V = self.value(X)  # V is (B, T, D_V)
+        H = (Q @ K) * D_K ** (-0.5)  # H is (B, T, T)
+        H_masked = H.masked_fill(
+            self.mask[:T, :T] == 0, float("-inf")
+        )  # H_masked is (B, T, T)
+        W = H_masked.softmax(
+            dim=-1
+        )  # W is (B, T, T), the last dim is normalized to sum to 1, and contains values >= 0
+        return W @ V  # (B, T, D_V)
+
+
+class FeedForward(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(D_MODEL, D_FF), nn.ReLU(), nn.Linear(D_FF, D_MODEL)
+        )
+
+    def forward(self, x):
+        return self.layers(x)
+
+
 class Model(nn.Module):
     def __init__(self, vocab_size):
         super().__init__()
-        self.token_embedding = nn.Embedding(vocab_size, N_MODEL)
-        self.position_embedding = nn.Embedding(CONTEXT_WINDOW, N_MODEL)
-
-        # this layer project the internal representation of dim N_MODEL
+        self.token_embedding = nn.Embedding(vocab_size, D_MODEL)
+        self.position_embedding = nn.Embedding(CONTEXT_WINDOW, D_MODEL)
+        self.attention_head = MaskedAttentionHead()
+        self.ff = FeedForward()
+        # this layer project the internal representation of dim D_MODEL
         # to a vocab_size dimension that represents the logits
-        self.lm_head = nn.Linear(N_MODEL, vocab_size)
+        self.lm_head = nn.Linear(D_MODEL, vocab_size)
 
     # x is (B, T) we have to be careful that during inference, 1 <= T <= CONTEXT_WINDOW
     # we want to output logits (B, T, vocab_size)
     def forward(self, x):
         _, T = x.shape
-        token_emb = self.token_embedding(x)  # (B, T, N_MODEL)
-        position_emb = self.position_embedding(torch.arange(T))  # (T, N_MODEL)
-        h = token_emb + position_emb  # (B, T, N_MODEL) thanks to broadcasting
+        token_emb = self.token_embedding(x)  # (B, T, D_MODEL)
+        position_emb = self.position_embedding(torch.arange(T))  # (T, D_MODEL)
+        h = token_emb + position_emb  # (B, T, D_MODEL) thanks to broadcasting
+        h = self.attention_head(h)
+        h = self.ff(h)
         return self.lm_head(h)
 
 
