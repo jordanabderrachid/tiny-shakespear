@@ -12,6 +12,7 @@ from tqdm import tqdm
 CONTEXT_WINDOW = 8
 BATCH_SIZE = 32
 D_MODEL = 32
+N_LAYER = 2
 HEAD = 2
 D_K = D_MODEL // HEAD  # (16)
 D_V = D_MODEL // HEAD  # (16)
@@ -119,10 +120,14 @@ class Block(nn.Module):
         super().__init__()
         self.masked_multi_head_attention = MultiHead()
         self.feed_forward = FeedForward()
+        self.ln1 = nn.LayerNorm(D_MODEL)
+        self.ln2 = nn.LayerNorm(D_MODEL)
 
     def forward(self, x):
-        y = self.masked_multi_head_attention(x)
-        y = self.feed_forward(y)
+        y = x + self.masked_multi_head_attention(x)
+        y = self.ln1(y)
+        y = y + self.feed_forward(y)
+        y = self.ln2(y)
         return y
 
 
@@ -131,7 +136,7 @@ class Model(nn.Module):
         super().__init__()
         self.token_embedding = nn.Embedding(vocab_size, D_MODEL)
         self.position_embedding = nn.Embedding(CONTEXT_WINDOW, D_MODEL)
-        self.block = Block()
+        self.blocks = nn.Sequential(*[Block() for _ in range(N_LAYER)])
         # this layer project the internal representation of dim D_MODEL
         # to a vocab_size dimension that represents the logits
         self.lm_head = nn.Linear(D_MODEL, vocab_size)
@@ -143,7 +148,7 @@ class Model(nn.Module):
         token_emb = self.token_embedding(x)  # (B, T, D_MODEL)
         position_emb = self.position_embedding(torch.arange(T))  # (T, D_MODEL)
         h = token_emb + position_emb  # (B, T, D_MODEL) thanks to broadcasting
-        h = self.block(h)
+        h = self.blocks(h)
         return self.lm_head(h)
 
 
